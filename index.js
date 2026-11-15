@@ -9,9 +9,9 @@ import {
 import { handleMessage } from "./src/message-handler.js";
 
 const required = ["DISCORD_BOT_TOKEN", "GEMINI_API_KEY"];
-const missing = required.filter((key) => !process.env[key]);
+const missing = required.filter((key) => !process.env[key]?.trim());
 if (missing.length) {
-  console.error("Missing required environment variables: " + missing.join(", "));
+  console.error("[Startup] Missing required environment variables: " + missing.join(", "));
   process.exit(1);
 }
 
@@ -32,7 +32,6 @@ const client = new Client({
   },
 });
 
-// Liveness endpoint: Render uses this to verify the Node process is serving HTTP.
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -43,7 +42,6 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Readiness endpoint: use this for external uptime alerts about Discord availability.
 app.get("/ready", (_req, res) => {
   const ready = discordReady && client.isReady();
   res.status(ready ? 200 : 503).json({
@@ -64,22 +62,36 @@ const server = app.listen(port, "0.0.0.0", () => {
 
 client.once(Events.ClientReady, (readyClient) => {
   discordReady = true;
-  console.log("[Discord] Logged in as " + readyClient.user.tag);
+  console.log("[Discord] READY — logged in as " + readyClient.user.tag);
 });
 
-client.on(Events.ShardDisconnect, () => {
+client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
   discordReady = false;
-  console.warn("[Discord] Gateway disconnected.");
+  console.warn("[Discord] Gateway shard " + shardId + " disconnected:", closeEvent?.code, closeEvent?.reason || "");
 });
 
-client.on(Events.ShardReady, () => {
+client.on(Events.ShardReady, (shardId) => {
   discordReady = true;
-  console.log("[Discord] Gateway shard ready.");
+  console.log("[Discord] Gateway shard " + shardId + " ready.");
 });
 
-client.on(Events.ShardResume, () => {
+client.on(Events.ShardResume, (shardId, replayedEvents) => {
   discordReady = true;
-  console.log("[Discord] Gateway session resumed.");
+  console.log("[Discord] Gateway shard " + shardId + " resumed; replayed events:", replayedEvents);
+});
+
+client.on(Events.ShardError, (error, shardId) => {
+  console.error("[Discord] Gateway shard " + shardId + " error:", error);
+});
+
+client.on(Events.Warn, (warning) => {
+  console.warn("[Discord] Warning:", warning);
+});
+
+client.on(Events.Debug, (info) => {
+  if (/connecting|identify|hello|heartbeat|ready|resume|error|close/i.test(info)) {
+    console.log("[Discord:debug]", info);
+  }
 });
 
 client.on(Events.MessageCreate, (message) => {
@@ -107,8 +119,27 @@ async function shutdown(signal) {
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
-
-client.login(process.env.DISCORD_BOT_TOKEN).catch((error) => {
-  console.error("[Discord] Login failed:", error);
+process.on("unhandledRejection", (reason) => {
+  console.error("[Process] Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("[Process] Uncaught exception:", error);
   process.exit(1);
 });
+
+console.log("[Discord] Starting login; token variable is present (value hidden).");
+const loginWatchdog = setTimeout(() => {
+  console.error("[Discord] Login has not completed after 30 seconds. Current WebSocket status:", client.ws.status);
+}, 30000);
+loginWatchdog.unref();
+
+client.login(process.env.DISCORD_BOT_TOKEN.trim())
+  .then(() => {
+    clearTimeout(loginWatchdog);
+    console.log("[Discord] Login promise resolved. WebSocket status:", client.ws.status);
+  })
+  .catch((error) => {
+    clearTimeout(loginWatchdog);
+    console.error("[Discord] Login failed:", error);
+    process.exit(1);
+  });
