@@ -9,6 +9,12 @@ module.exports = {
     // Ignore messages from bots
     if (message.author.bot) return;
 
+    const inGuild = message.inGuild();
+    const botMentioned = message.mentions.has(message.client.user);
+    console.log(
+      `[MESSAGE] Received ${inGuild ? "guild" : "DM"} message; botMentioned=${botMentioned}.`,
+    );
+
     const handlers = [...message.client.messages.values()];
     const matchingHandlers = [];
 
@@ -30,6 +36,13 @@ module.exports = {
     const selectedHandlers = exclusiveHandlers.length
       ? exclusiveHandlers
       : matchingHandlers;
+
+    if (selectedHandlers.length === 0) {
+      console.log("[MESSAGE] No message handler matched.");
+      return;
+    }
+
+    console.log(`[MESSAGE] Dispatching ${selectedHandlers.length} handler(s).`);
 
     const results = await Promise.allSettled(
       selectedHandlers.map((handler) => handler.execute(message)),
