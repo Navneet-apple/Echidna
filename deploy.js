@@ -23,7 +23,13 @@ for (const file of commandFiles) {
   }
 }
 
-const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN);
+const rest = new REST({
+  timeout: 10000,
+  retries: 0,
+  rejectOnRateLimit: true,
+}).setToken(
+  process.env.DISCORD_BOT_TOKEN,
+);
 
 (async () => {
   try {

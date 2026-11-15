@@ -8,6 +8,8 @@ const {
   Collection,
   GatewayIntentBits,
   Partials,
+  REST,
+  Routes,
 } = require("discord.js");
 const client = new Client({
   intents: [
@@ -191,6 +193,37 @@ console.log("[Startup] Discord listeners:", {
   messageContentIntent: client.options.intents.has(GatewayIntentBits.MessageContent),
   directMessagesIntent: client.options.intents.has(GatewayIntentBits.DirectMessages),
 });
+
+async function syncSlashCommands() {
+  const clientId = process.env.CLIENT_ID?.trim();
+  if (!clientId) {
+    console.warn("[Commands] CLIENT_ID is missing; slash commands were not synced.");
+    return;
+  }
+
+  const commands = [...client.commands.values()].map((command) =>
+    command.data.toJSON(),
+  );
+  const rest = new REST({
+    timeout: 10000,
+    retries: 0,
+    rejectOnRateLimit: true,
+  }).setToken(
+    process.env.DISCORD_BOT_TOKEN.trim(),
+  );
+
+  console.log(`[Commands] Syncing ${commands.length} global command(s) in background.`);
+  try {
+    const data = await rest.put(Routes.applicationCommands(clientId), {
+      body: commands,
+    });
+    console.log(`[Commands] Synced ${data.length} global command(s).`);
+  } catch (error) {
+    console.error("[Commands] Background sync failed; the bot will continue starting:", error);
+  }
+}
+
+void syncSlashCommands();
 
 client.on("raw", (packet) => {
   if (packet.t !== "MESSAGE_CREATE") return;
