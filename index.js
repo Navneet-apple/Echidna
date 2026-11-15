@@ -32,19 +32,30 @@ const client = new Client({
   },
 });
 
-app.get("/", (_req, res) => {
-  res.status(200).send("Echidna is running.");
-});
-
+// Liveness endpoint: Render uses this to verify the Node process is serving HTTP.
 app.get("/health", (_req, res) => {
-  const healthy = discordReady && client.isReady();
-  res.status(healthy ? 200 : 503).json({
-    status: healthy ? "ok" : "degraded",
+  res.status(200).json({
+    status: "ok",
     service: "echidna",
-    discord: healthy ? "connected" : "disconnected",
+    discord: discordReady && client.isReady() ? "connected" : "disconnected",
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
   });
+});
+
+// Readiness endpoint: use this for external uptime alerts about Discord availability.
+app.get("/ready", (_req, res) => {
+  const ready = discordReady && client.isReady();
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    service: "echidna",
+    discord: ready ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/", (_req, res) => {
+  res.status(200).send("Echidna is running.");
 });
 
 const server = app.listen(port, "0.0.0.0", () => {
