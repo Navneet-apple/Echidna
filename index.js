@@ -156,15 +156,26 @@ async function verifyDiscordGatewayAccess() {
     throw new Error("Cannot reach Discord Gateway API from this Render instance.");
   }
 
-  const body = await response.json().catch(() => ({}));
+  const rawBody = await response.text();
+  let body = {};
+  try { body = JSON.parse(rawBody); } catch { /* Discord edge errors may not be JSON. */ }
+
+  if (response.status === 429) {
+    const retryAfter = Number(response.headers.get("retry-after") || body?.retry_after || 5);
+    const waitMs = Math.min(Math.max(retryAfter * 1000, 1000), 60000);
+    console.warn("[Discord:preflight] Discord rate-limited the Gateway API request (HTTP 429). Retry-After:", retryAfter, "seconds; response:", rawBody.slice(0, 240));
+    console.warn("[Discord:preflight] Waiting", waitMs, "ms, then allowing discord.js to perform its own Gateway connection.");
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    return;
+  }
+
   if (!response.ok) {
-    console.error("[Discord:preflight] Gateway API rejected the request with HTTP", response.status, "code:", body?.code ?? "unknown", "message:", body?.message ?? "unknown");
-    throw new Error("Discord Gateway API authentication failed (HTTP " + response.status + "). Check the bot token in Render environment variables.");
+    console.error("[Discord:preflight] Gateway API rejected the request with HTTP", response.status, "code:", body?.code ?? "unknown", "message:", body?.message ?? rawBody.slice(0, 240));
+    throw new Error("Discord Gateway API request failed (HTTP " + response.status + "). Check the bot token and Discord application configuration.");
   }
 
   console.log("[Discord:preflight] Gateway API reachable; HTTP", response.status, "in", Date.now() - startedAt, "ms; gateway host:", String(body.url || "").split("://").pop(), "recommended shards:", body.shards);
 }
-
 async function startDiscord() {
   await verifyDiscordGatewayAccess();
   console.log("[Discord] Starting discord.js login; token value hidden.");
