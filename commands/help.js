@@ -5,7 +5,9 @@ module.exports = {
     .setName("help")
     .setDescription("Show Echidna's commands and how to talk to her."),
   async execute(interaction) {
+    console.log("[Interaction:/help] Deferring reply.");
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    console.log("[Interaction:/help] Deferred; sending help content.");
     await interaction.editReply({
       embeds: [
         {
@@ -21,5 +23,6 @@ module.exports = {
         },
       ],
     });
+    console.log("[Interaction:/help] Help response sent.");
   },
 };

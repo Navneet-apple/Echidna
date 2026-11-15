@@ -20,6 +20,11 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Message, Partials.Channel],
+  rest: {
+    timeout: 2500,
+    retries: 0,
+    rejectOnRateLimit: ["/"],
+  },
   // This personal assistant uses a single Gateway shard.
   shards: [0],
   shardCount: 1,
@@ -205,9 +210,9 @@ async function syncSlashCommands() {
     command.data.toJSON(),
   );
   const rest = new REST({
-    timeout: 10000,
+    timeout: 2500,
     retries: 0,
-    rejectOnRateLimit: true,
+    rejectOnRateLimit: ["/"],
   }).setToken(
     process.env.DISCORD_BOT_TOKEN.trim(),
   );
