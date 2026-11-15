@@ -1,6 +1,6 @@
 # Echidna
 
-Echidna is a multifunctional Discord bot with slash commands, server utilities, and AI chat.
+Echidna is a personal Discord assistant. She introduces herself as Echidna and helps with the request at hand.
 
 ## Self Hosting
 

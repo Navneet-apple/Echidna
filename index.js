@@ -1,6 +1,7 @@
 // Core codes
 
 const fs = require("node:fs");
+const http = require("node:http");
 const path = require("node:path");
 const {
   Client,
@@ -27,6 +28,42 @@ require("dotenv").config({
   path: path.resolve(__dirname, ".env"),
   quiet: true,
 });
+
+const port = Number(process.env.PORT || 10000);
+const pingServer = http.createServer((request, response) => {
+  if (request.method === "GET" && request.url === "/ping") {
+    response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("OK");
+    return;
+  }
+
+  response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  response.end("Not Found");
+});
+
+pingServer.listen(port, "0.0.0.0", () => {
+  console.log(`[HTTP] Ping server listening on port ${port}`);
+});
+
+const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.trim().replace(/\/+$/, "");
+if (renderExternalUrl) {
+  const selfPing = async () => {
+    try {
+      const response = await fetch(`${renderExternalUrl}/ping`, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) {
+        console.warn(`[HTTP] Render self-ping returned HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.warn("[HTTP] Render self-ping failed:", error?.message || error);
+    }
+  };
+
+  const timer = setInterval(() => void selfPing(), 14 * 60 * 1000);
+  timer.unref();
+  void selfPing();
+}
 
 // Commands Handler
 
