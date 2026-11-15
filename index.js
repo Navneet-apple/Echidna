@@ -23,7 +23,6 @@ const client = new Client({
   rest: {
     timeout: 2500,
     retries: 0,
-    rejectOnRateLimit: ["/"],
   },
   // This personal assistant uses a single Gateway shard.
   shards: [0],
@@ -212,7 +211,6 @@ async function syncSlashCommands() {
   const rest = new REST({
     timeout: 2500,
     retries: 0,
-    rejectOnRateLimit: ["/"],
   }).setToken(
     process.env.DISCORD_BOT_TOKEN.trim(),
   );
