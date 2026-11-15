@@ -162,7 +162,7 @@ async function verifyDiscordGatewayAccess() {
     throw new Error("Discord Gateway API authentication failed (HTTP " + response.status + "). Check the bot token in Render environment variables.");
   }
 
-  console.log("[Discord:preflight] Gateway API reachable; HTTP", response.status, "in", Date.now() - startedAt, "ms; gateway host:", String(body.url || "").replace(/^wss?:\\/\\//, ""), "recommended shards:", body.shards);
+  console.log("[Discord:preflight] Gateway API reachable; HTTP", response.status, "in", Date.now() - startedAt, "ms; gateway host:", String(body.url || "").split("://").pop(), "recommended shards:", body.shards);
 }
 
 async function startDiscord() {
