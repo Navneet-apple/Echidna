@@ -31,6 +31,8 @@ require("dotenv").config({
   quiet: true,
 });
 
+console.log("[AI] Pollinations API key configured:", Boolean(process.env.POLLINATIONS_API_KEY?.trim()));
+
 if (!process.env.DISCORD_BOT_TOKEN?.trim()) {
   console.error("[Startup] Missing required environment variable: DISCORD_BOT_TOKEN");
   process.exit(1);
@@ -169,16 +171,39 @@ const eventFiles = fs
 for (const file of eventFiles) {
   const filePath = path.join(eventsPath, file);
   const event = require(filePath);
-  if (event.once) {
-    client.once(event.name, (...args) => event.execute(...args));
-  } else {
-    client.on(event.name, (...args) => event.execute(...args));
-  }
+  const listener = (...args) => {
+    Promise.resolve().then(() => event.execute(...args)).catch((error) => {
+      console.error(`[Event:${event.name}] Handler failed:`, error);
+    });
+  };
+
+  if (event.once) client.once(event.name, listener);
+  else client.on(event.name, listener);
 }
 
-console.log("Ready event listeners:", {
-  ready: client.listenerCount("ready"),
+console.log("[Startup] Loaded commands:", [...client.commands.keys()].join(", ") || "none");
+console.log("[Startup] Loaded message handlers:", [...client.messages.keys()].join(", ") || "none");
+console.log("[Startup] Discord listeners:", {
   clientReady: client.listenerCount("clientReady"),
+  messageCreate: client.listenerCount("messageCreate"),
+  interactionCreate: client.listenerCount("interactionCreate"),
+  guildMessagesIntent: client.options.intents.has(GatewayIntentBits.GuildMessages),
+  messageContentIntent: client.options.intents.has(GatewayIntentBits.MessageContent),
+  directMessagesIntent: client.options.intents.has(GatewayIntentBits.DirectMessages),
+});
+
+client.on("raw", (packet) => {
+  if (packet.t !== "MESSAGE_CREATE") return;
+  const data = packet.d;
+  if (data?.author?.bot) return;
+
+  const inGuild = Boolean(data?.guild_id);
+  const botMentioned = data?.mentions?.some((user) => user.id === client.user?.id) ?? false;
+  if (!inGuild || botMentioned) {
+    console.log(
+      `[Discord:raw] MESSAGE_CREATE received; type=${inGuild ? "guild" : "DM"}; botMentioned=${botMentioned}.`,
+    );
+  }
 });
 
 const gatewayStatusNames = {
