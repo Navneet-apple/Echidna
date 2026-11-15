@@ -1,0 +1,21 @@
+{
+  "name": "echidna-discord-bot",
+  "version": "1.0.0",
+  "description": "An open-source Discord community assistant powered by Gemini 4 Hydrogen.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy-commands": "node deploy-commands.js",
+    "check": "node --check index.js && node --check src/ai.js && node --check src/message-handler.js && node --check deploy-commands.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@google/genai": "^2.32.0",
+    "discord.js": "^14.28.1",
+    "dotenv": "^18.0.10",
+    "express": "^5.1.0"
+  }
+}
