@@ -194,14 +194,25 @@ module.exports = {
 
       const invalidApiKey =
         error?.status === 400 && /api.?key|api_key/i.test(error?.message || "");
+      const quotaExceeded =
+        error?.status === 429 || /quota|resource_exhausted/i.test(error?.message || "");
+      const errorMessage = invalidApiKey
+        ? "I can't reach my AI service right now. Please ask my owner to check the Google AI API key."
+        : quotaExceeded
+          ? "I'm temporarily out of AI quota. Please try again later."
+          : "I couldn't complete that request just now. Please try again in a moment.";
 
-      await message.reply({
-        content: invalidApiKey
-          ? "I can't reach my AI service right now. Please ask my owner to check the Google AI API key."
-          : "I couldn't complete that request just now. Please try again in a moment.",
-      }).catch((replyError) => {
+      try {
+        await message.reply({ content: errorMessage });
+        console.log("[AI] Error reply sent.");
+      } catch (replyError) {
         console.error("[AI] Could not send error reply:", replyError);
-      });
+        await message.channel.send(errorMessage).then(() => {
+          console.log("[AI] Error message sent to channel.");
+        }).catch((sendError) => {
+          console.error("[AI] Could not send error message to channel:", sendError);
+        });
+      }
     } finally {
       clearInterval(typingInterval);
     }
