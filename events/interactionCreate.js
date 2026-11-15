@@ -7,9 +7,6 @@ module.exports = {
   async execute(interaction) {
     const command = interaction.client.commands.get(interaction.commandName);
     if (!interaction.isChatInputCommand()) return;
-    if (!interaction.guild) {
-      interaction.reply({ embeds: [dmNotice] });
-    }
     if (!command) return;
     try {
       await command.execute(interaction);

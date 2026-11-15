@@ -47,7 +47,9 @@ async function urlToGenerativePart(url, mimeType) {
 
 module.exports = {
   match(message) {
-    return message.inGuild() && message.mentions.has(message.client.user);
+    return message.inGuild()
+      ? message.mentions.has(message.client.user)
+      : true;
   },
 
   async execute(message) {
@@ -77,7 +79,7 @@ module.exports = {
               },
               {
                 name: "Note",
-                value: "This bot only works in the server, not in DMs!",
+                value: "You can message me here or mention me in a server.",
               },
             ],
           },

@@ -10,7 +10,7 @@ const commandFiles = fs
   .filter((file) => file.endsWith(".js"));
 
 const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
+const legacyGuildId = process.env.GUILD_ID;
 
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
@@ -29,16 +29,23 @@ const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN);
 (async () => {
   try {
     console.log(
-      `Started reloading ${commands.length} guild application (/) commands.`
+      `Started reloading ${commands.length} global application (/) commands.`
     );
 
     const data = await rest.put(
-      Routes.applicationGuildCommands(clientId, guildId),
+      Routes.applicationCommands(clientId),
       { body: commands }
     );
 
+    if (legacyGuildId) {
+      await rest.put(Routes.applicationGuildCommands(clientId, legacyGuildId), {
+        body: [],
+      });
+      console.log("Removed legacy guild-scoped commands.");
+    }
+
     console.log(
-      `Successfully reloaded ${data.length} guild application (/) commands.`
+      `Successfully reloaded ${data.length} global application (/) commands.`
     );
   } catch (error) {
     console.error(error);
