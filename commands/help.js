@@ -3,15 +3,20 @@ const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("help")
-    .setDescription("How to check my available commands!"),
+    .setDescription("Show Echidna's commands and how to talk to her."),
   async execute(interaction) {
-    interaction.reply({
+    await interaction.reply({
       embeds: [
         {
           color: 0x0ccab6,
-          title: "**Need Command Help?**",
+          title: "Echidna's commands",
           description:
-            "Type `/` in the message box and select my avatar on the sidebar to check all my available commands!",
+            "Ask me with `/ask`, mention me in a server, or message me directly.",
+          fields: [
+            { name: "/ask question", value: "Ask me a question directly." },
+            { name: "/model", value: "See the AI model I'm using." },
+            { name: "/ping", value: "Check whether I'm responding." },
+          ],
         },
       ],
       flags: MessageFlags.Ephemeral,

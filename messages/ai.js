@@ -1,10 +1,9 @@
-// Pollinations OpenAI-compatible chat API.
-const POLLINATIONS_API_URL = "https://gen.pollinations.ai/v1/chat/completions";
-const DEFAULT_MODEL = "openai/gpt-5.4-nano";
-
-// System Instruction
-
-const systemInstruction = `Your name is Echidna. You are a personal assistant. Be friendly, thoughtful, and concise. Help with the request at hand without claiming a specialized background or inventing personal details. If you are unsure or need more context, say so and ask a simple follow-up question. Keep replies under 1800 characters. Never output Discord mass-mention tokens such as @everyone or @here.`;
+const {
+  SYSTEM_INSTRUCTION,
+  formatReply,
+  generateCompletion,
+  getUserFacingError,
+} = require("../src/pollinations");
 
 // Helpers
 
@@ -74,17 +73,6 @@ module.exports = {
       return;
     }
 
-    const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
-    if (!apiKey) {
-      console.error("[AI] POLLINATIONS_API_KEY is not configured.");
-      await showTyping();
-      await message
-        .reply("My AI service isn't configured yet. Please ask my owner to add a Pollinations API key.")
-        .then(() => console.log("[AI] Missing-key notice sent."))
-        .catch((error) => console.error("[AI] Could not send missing-key notice:", error));
-      return;
-    }
-
     // AI responder
     void showTyping();
     const typingInterval = setInterval(() => void showTyping(), 7000);
@@ -140,58 +128,20 @@ module.exports = {
         : messageParts.map((part) => part.text).join("\n\n");
 
       console.log("[AI] Generating response with Pollinations.");
-      const response = await fetch(POLLINATIONS_API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: process.env.POLLINATIONS_MODEL?.trim() || DEFAULT_MODEL,
-          messages: [
-            { role: "system", content: systemInstruction },
-            { role: "user", content: userContent },
-          ],
-          max_tokens: 1200,
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
-        const apiError = new Error(`Pollinations API error (${response.status}): ${detail}`);
-        apiError.status = response.status;
-        throw apiError;
-      }
+      const replyText = await generateCompletion([
+        { role: "system", content: SYSTEM_INSTRUCTION },
+        { role: "user", content: userContent },
+      ]);
       console.log("[AI] Pollinations response received.");
 
-      const footer =
-        "\n\n-# Powered by Echidna AI" +
-        "\n-# AI can make mistakes.";
-
-      // Format response
-      const replyText = data?.choices?.[0]?.message?.content || "";
-      const maxLength = Math.min(1800, 2000 - footer.length);
-
-      const safeText =
-        replyText.length > maxLength
-          ? `${replyText.slice(0, maxLength - 3)}...`
-          : replyText;
-
       await message.reply({
-        content: `${safeText || "No response generated."}${footer}`,
+        content: formatReply(replyText),
       });
       console.log("[AI] Reply sent.");
     } catch (error) {
       console.error("[AI] Pollinations request failed:", error);
 
-      const invalidApiKey = error?.status === 401;
-      const quotaExceeded = error?.status === 402 || error?.status === 429;
-      const errorMessage = invalidApiKey
-        ? "I can't reach my AI service right now. Please ask my owner to check the Pollinations API key."
-        : quotaExceeded
-          ? "I'm temporarily out of AI credits or capacity. Please try again later."
-          : "I couldn't complete that request just now. Please try again in a moment.";
+      const errorMessage = getUserFacingError(error);
 
       try {
         await message.reply({ content: errorMessage });
