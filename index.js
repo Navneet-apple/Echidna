@@ -18,6 +18,9 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Message, Partials.Channel],
+  // This personal assistant uses a single Gateway shard.
+  shards: [0],
+  shardCount: 1,
   allowedMentions: {
     parse: ["users", "roles"],
     repliedUser: true,
@@ -27,6 +30,11 @@ require("dotenv").config({
   path: path.resolve(__dirname, ".env"),
   quiet: true,
 });
+
+if (!process.env.DISCORD_BOT_TOKEN?.trim()) {
+  console.error("[Startup] Missing required environment variable: DISCORD_BOT_TOKEN");
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT || 10000);
 const pingServer = http.createServer((request, response) => {
@@ -63,6 +71,46 @@ if (renderExternalUrl) {
   timer.unref();
   void selfPing();
 }
+
+// Render has returned Cloudflare errors for Discord's authenticated
+// /gateway/bot endpoint. This bot is single-shard, so use the public gateway
+// URL and supply the matching single-shard metadata to discord.js.
+const originalRestGet = client.rest.get.bind(client.rest);
+client.rest.get = async (route, options) => {
+  if (route !== "/gateway/bot") return originalRestGet(route, options);
+
+  let gatewayUrl = "wss://gateway.discord.gg";
+  try {
+    const response = await fetch("https://discord.com/api/v10/gateway", {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (typeof data.url === "string" && data.url.startsWith("wss://")) {
+        gatewayUrl = data.url;
+      } else {
+        console.warn("[Discord:gateway] Public endpoint returned an unexpected URL; using the documented fallback.");
+      }
+    } else {
+      console.warn("[Discord:gateway] Public endpoint returned HTTP", response.status, "; using the documented fallback.");
+    }
+  } catch (error) {
+    console.warn("[Discord:gateway] Public endpoint unavailable:", error?.message || error, "; using the documented fallback.");
+  }
+
+  console.log("[Discord:gateway] Using single-shard Gateway URL:", gatewayUrl);
+  return {
+    url: gatewayUrl,
+    shards: 1,
+    session_start_limit: {
+      total: 1,
+      remaining: 1,
+      reset_after: 5000,
+      max_concurrency: 1,
+    },
+  };
+};
 
 // Commands Handler
 
@@ -133,4 +181,67 @@ console.log("Ready event listeners:", {
   clientReady: client.listenerCount("clientReady"),
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+const gatewayStatusNames = {
+  0: "READY",
+  1: "CONNECTING",
+  2: "RECONNECTING",
+  3: "IDLE",
+  4: "NEARLY",
+  5: "DISCONNECTED",
+  6: "WAITING_FOR_GUILDS",
+  7: "IDENTIFYING",
+  8: "RESUMING",
+};
+
+function gatewaySnapshot() {
+  return [...client.ws.shards.values()].map((shard) => ({
+    id: shard.id,
+    status: gatewayStatusNames[shard.status] || `UNKNOWN(${shard.status})`,
+    ping: shard.ping,
+  }));
+}
+
+client.on("shardError", (error, shardId) => {
+  console.error(`[Discord] Gateway shard ${shardId} error:`, error);
+});
+
+client.on("shardDisconnect", (closeEvent, shardId) => {
+  console.warn(`[Discord] Gateway shard ${shardId} disconnected:`, closeEvent?.code, closeEvent?.reason || "");
+});
+
+async function startDiscord() {
+  let attempt = 0;
+  while (!client.isReady()) {
+    let loginWatchdog;
+    try {
+      console.log("[Discord] Starting login; token value hidden.");
+      loginWatchdog = setTimeout(() => {
+        console.warn("[Discord] Login is still in progress. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
+      }, 45000);
+      loginWatchdog.unref();
+
+      await client.login(process.env.DISCORD_BOT_TOKEN.trim());
+      clearTimeout(loginWatchdog);
+      console.log("[Discord] Login promise resolved. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
+      return;
+    } catch (error) {
+      clearTimeout(loginWatchdog);
+      const status = error?.status ?? error?.httpStatus;
+      if (status === 401 || /tokeninvalid|invalid token/i.test(error?.message || "")) {
+        console.error("[Discord] Login rejected. Check DISCORD_BOT_TOKEN in Render; its value is not logged.");
+        process.exit(1);
+      }
+
+      attempt += 1;
+      const delayMs = Math.min(30000 * 2 ** Math.min(attempt - 1, 4), 300000);
+      console.error("[Discord] Login attempt failed:", error?.stack || error);
+      console.warn("[Discord] Retrying Gateway login in", Math.round(delayMs / 1000), "seconds.");
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+void startDiscord().catch((error) => {
+  console.error("[Discord:startup] Discord startup aborted:", error?.message || error);
+  process.exit(1);
+});
