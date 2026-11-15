@@ -17,7 +17,7 @@ Echidna is a standalone Discord bot adapted from the architecture and ideas of [
 
 - Node.js 22 or newer
 - A Discord application and bot token
-- A Gemini API key with access to Gemini 4 Hydrogen
+- A Gemini Enterprise Agent Platform Express Mode API key with access to Gemini 4 Hydrogen. A standard Google AI Studio Gemini API key uses a different API and will not work with this model.
 
 ## Local setup
 
@@ -34,7 +34,7 @@ Echidna is a standalone Discord bot adapted from the architecture and ideas of [
    | Variable | Required | Description |
    |---|---|---|
    | \`DISCORD_BOT_TOKEN\` | Yes | Discord bot token |
-   | \`GEMINI_API_KEY\` | Yes | Google Gemini API key |
+   | \`GEMINI_API_KEY\` | Yes | Gemini Enterprise Agent Platform Express Mode API key |
    | \`GEMINI_MODEL\` | No | Defaults to \`gemini-4-hydrogen\` |
    | \`GEMINI_TIMEOUT_MS\` | No | Gemini request timeout in milliseconds; defaults to \`60000\` (allowed: 1000–180000) |
    | \`PORT\` | No | HTTP port; defaults to \`3000\` |
@@ -114,7 +114,7 @@ Echidna/
 
 - **Bot never responds:** Confirm Message Content Intent is enabled and the bot can view the channel.
 - **Bot responds to every message:** Confirm the latest version is deployed; the message handler filters ordinary messages.
-- **Gemini authentication error:** Verify \`GEMINI_API_KEY\` in Render or \`.env\`.
+- **Gemini authentication or model error:** Verify \`GEMINI_API_KEY\` is an Agent Platform Express Mode key, not a standard AI Studio key, and that the key's Google Cloud project has billing and the Vertex AI API enabled.
 - **Model unavailable:** Confirm that the API key and API surface have access to \`gemini-4-hydrogen\`.
 - **Bot goes offline:** Check Render logs and the free-tier sleep behavior.
 
