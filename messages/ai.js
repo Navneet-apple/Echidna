@@ -1,22 +1,6 @@
-// Gemini AI Message Handler
-
-const { GoogleGenAI, ThinkingLevel } = require("@google/genai");
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY,
-  httpOptions: {
-    apiVersion: "v1beta",
-    timeout: 30000,
-    retryOptions: {
-      attempts: 3,
-      initialDelay: 1,
-      maxDelay: 4,
-      expBase: 2,
-      jitter: 1,
-      httpStatusCodes: [500, 502, 503, 504],
-    },
-  },
-});
+// Pollinations OpenAI-compatible chat API.
+const POLLINATIONS_API_URL = "https://gen.pollinations.ai/v1/chat/completions";
+const DEFAULT_MODEL = "openai/gpt-5.4-nano";
 
 // System Instruction
 
@@ -28,8 +12,8 @@ function removeBotMention(content, botId) {
   return content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
 }
 
-async function urlToGenerativePart(url, mimeType) {
-  const response = await fetch(url);
+async function urlToDataUrl(url, mimeType) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch image from URL: ${url}`);
@@ -37,12 +21,7 @@ async function urlToGenerativePart(url, mimeType) {
 
   const arrayBuffer = await response.arrayBuffer();
 
-  return {
-    inlineData: {
-      data: Buffer.from(arrayBuffer).toString("base64"),
-      mimeType,
-    },
-  };
+  return `data:${mimeType};base64,${Buffer.from(arrayBuffer).toString("base64")}`;
 }
 // Message Handler
 
@@ -95,6 +74,14 @@ module.exports = {
       return;
     }
 
+    const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
+    if (!apiKey) {
+      await message.reply(
+        "My AI service isn't configured yet. Please ask my owner to add a Pollinations API key.",
+      );
+      return;
+    }
+
     // AI responder
     void showTyping();
     const typingInterval = setInterval(() => void showTyping(), 7000);
@@ -117,6 +104,7 @@ module.exports = {
 
             if (cleanRefContent) {
               messageParts.push({
+                type: "text",
                 text: `Context (The message you are replying to):\n"${cleanRefContent}"\n\n---`,
               });
             }
@@ -128,56 +116,58 @@ module.exports = {
 
       // User question
       if (question) {
-        messageParts.push({ text: question });
+        messageParts.push({ type: "text", text: question });
       }
 
       // Image attachments
       for (const [index, attachment] of [
         ...imageAttachments.values(),
       ].entries()) {
+        messageParts.push({ type: "text", text: `Image ${index + 1}:` });
         messageParts.push({
-          text: `Image ${index + 1}:`,
+          type: "image_url",
+          image_url: {
+            url: await urlToDataUrl(attachment.url, attachment.contentType),
+          },
         });
-
-        messageParts.push(
-          await urlToGenerativePart(attachment.url, attachment.contentType),
-        );
       }
 
-      // Generate AI response
-      console.log("[AI] Generating response.");
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: [
-          {
-            role: "user",
-            parts: messageParts,
-          },
-        ],
-        config: {
-          systemInstruction,
-          tools: [{ googleSearch: {} }],
-          maxOutputTokens: 3600,
-          thinkingConfig: {
-            thinkingLevel: ThinkingLevel.LOW,
-          },
+      const userContent = messageParts.some((part) => part.type === "image_url")
+        ? messageParts
+        : messageParts.map((part) => part.text).join("\n\n");
+
+      console.log("[AI] Generating response with Pollinations.");
+      const response = await fetch(POLLINATIONS_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          model: process.env.POLLINATIONS_MODEL?.trim() || DEFAULT_MODEL,
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: userContent },
+          ],
+          max_tokens: 1200,
+        }),
+        signal: AbortSignal.timeout(30000),
       });
-      console.log("[AI] Response generated.");
-
-      // Check Google Search usage
-      const usedSearch =
-        (response.candidates?.[0]?.groundingMetadata?.groundingChunks?.length ??
-          0) > 0;
-
-      const searchStatus = usedSearch ? " with Google Search" : "";
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
+        const apiError = new Error(`Pollinations API error (${response.status}): ${detail}`);
+        apiError.status = response.status;
+        throw apiError;
+      }
+      console.log("[AI] Pollinations response received.");
 
       const footer =
-        `\n\n-# Powered by Echidna AI${searchStatus}` +
-        "\n-# Gemini is AI and can make mistakes.";
+        "\n\n-# Powered by Echidna AI" +
+        "\n-# AI can make mistakes.";
 
       // Format response
-      const replyText = response.text || "";
+      const replyText = data?.choices?.[0]?.message?.content || "";
       const maxLength = Math.min(1800, 2000 - footer.length);
 
       const safeText =
@@ -190,16 +180,14 @@ module.exports = {
       });
       console.log("[AI] Reply sent.");
     } catch (error) {
-      console.error("AI Generation Error:", error);
+      console.error("[AI] Pollinations request failed:", error);
 
-      const invalidApiKey =
-        error?.status === 400 && /api.?key|api_key/i.test(error?.message || "");
-      const quotaExceeded =
-        error?.status === 429 || /quota|resource_exhausted/i.test(error?.message || "");
+      const invalidApiKey = error?.status === 401;
+      const quotaExceeded = error?.status === 402 || error?.status === 429;
       const errorMessage = invalidApiKey
-        ? "I can't reach my AI service right now. Please ask my owner to check the Google AI API key."
+        ? "I can't reach my AI service right now. Please ask my owner to check the Pollinations API key."
         : quotaExceeded
-          ? "I'm temporarily out of AI quota. Please try again later."
+          ? "I'm temporarily out of AI credits or capacity. Please try again later."
           : "I couldn't complete that request just now. Please try again in a moment.";
 
       try {
