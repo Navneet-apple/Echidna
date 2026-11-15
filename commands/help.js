@@ -5,7 +5,8 @@ module.exports = {
     .setName("help")
     .setDescription("Show Echidna's commands and how to talk to her."),
   async execute(interaction) {
-    await interaction.reply({
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.editReply({
       embeds: [
         {
           color: 0x0ccab6,
@@ -19,7 +20,6 @@ module.exports = {
           ],
         },
       ],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

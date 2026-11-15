@@ -226,6 +226,13 @@ async function syncSlashCommands() {
 void syncSlashCommands();
 
 client.on("raw", (packet) => {
+  if (packet.t === "INTERACTION_CREATE") {
+    console.log(
+      `[Discord:raw] INTERACTION_CREATE received; command=${packet.d?.data?.name || "unknown"}.`,
+    );
+    return;
+  }
+
   if (packet.t !== "MESSAGE_CREATE") return;
   const data = packet.d;
   if (data?.author?.bot) return;
