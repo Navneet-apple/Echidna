@@ -2,6 +2,7 @@ import { generateReply } from "./ai.js";
 
 const MAX_HISTORY_MESSAGES = 12;
 const histories = new Map();
+const channelQueues = new Map();
 
 function getHistory(key) {
   if (!histories.has(key)) histories.set(key, []);
@@ -10,6 +11,47 @@ function getHistory(key) {
 
 function trimHistory(history) {
   while (history.length > MAX_HISTORY_MESSAGES) history.shift();
+}
+
+async function processAcceptedMessage(message, client, cleaned) {
+  const history = getHistory(message.channelId);
+  await message.channel.sendTyping().catch(() => {});
+  const startedAt = Date.now();
+
+  try {
+    console.log("[AI] Gemini request started; history messages:", history.length);
+    const response = await generateReply(history, cleaned);
+    console.log("[AI] Gemini response generated; characters:", response.length, "durationMs:", Date.now() - startedAt);
+
+    history.push({ role: "user", text: cleaned });
+    history.push({ role: "model", text: response });
+    trimHistory(history);
+
+    const chunks = response.match(/[\\s\\S]{1,1900}/g) || ["I couldn't produce a response."];
+    await message.reply({
+      content: chunks[0],
+      allowedMentions: { repliedUser: false },
+    });
+
+    for (const chunk of chunks.slice(1)) {
+      await message.channel.send({
+        content: chunk,
+        allowedMentions: { parse: [] },
+      });
+    }
+  } catch (error) {
+    const timedOut = ["AbortError", "TimeoutError"].includes(error?.name) ||
+      /timed? ?out|aborted/i.test(error?.message || "");
+    console.error("[AI] Response failed after", Date.now() - startedAt, "ms:", error?.stack || error);
+    await message.reply({
+      content: timedOut
+        ? "Gemini is taking too long to respond. Please try again in a moment."
+        : "I'm unable to reach the AI service right now. Please try again shortly.",
+      allowedMentions: { repliedUser: false },
+    }).catch((replyError) => {
+      console.error("[Discord] Could not send error reply:", replyError);
+    });
+  }
 }
 
 export async function handleMessage(message, client) {
@@ -42,7 +84,6 @@ export async function handleMessage(message, client) {
 
   if (!directlyMentioned && !isReplyToBot) return;
 
-  console.log("[Message] Trigger accepted; preparing Gemini request.");
   const cleaned = message.content
     .replaceAll("<@" + client.user.id + ">", "")
     .replaceAll("<@!" + client.user.id + ">", "")
@@ -56,35 +97,20 @@ export async function handleMessage(message, client) {
     return;
   }
 
-  const history = getHistory(message.channelId);
-  await message.channel.sendTyping().catch(() => {});
+  // Keep each channel's requests in order so rapid messages cannot race
+  // against one another while reading and updating conversation history.
+  const channelId = message.channelId;
+  const previous = channelQueues.get(channelId) || Promise.resolve();
+  const current = previous
+    .catch(() => {})
+    .then(() => processAcceptedMessage(message, client, cleaned));
 
+  channelQueues.set(channelId, current);
   try {
-    const response = await generateReply(history, cleaned);
-    console.log("[AI] Gemini response generated; characters:", response.length);
-    history.push({ role: "user", text: cleaned });
-    history.push({ role: "model", text: response });
-    trimHistory(history);
-
-    const chunks = response.match(/[\s\S]{1,1900}/g) || ["I couldn't produce a response."];
-    await message.reply({
-      content: chunks[0],
-      allowedMentions: { repliedUser: false },
-    });
-
-    for (const chunk of chunks.slice(1)) {
-      await message.channel.send({
-        content: chunk,
-        allowedMentions: { parse: [] },
-      });
+    await current;
+  } finally {
+    if (channelQueues.get(channelId) === current) {
+      channelQueues.delete(channelId);
     }
-  } catch (error) {
-    console.error("[AI] Response failed:", error?.stack || error);
-    await message.reply({
-      content: "I'm unable to reach the AI service right now. Please try again shortly.",
-      allowedMentions: { repliedUser: false },
-    }).catch((replyError) => {
-      console.error("[Discord] Could not send error reply:", replyError);
-    });
   }
 }
