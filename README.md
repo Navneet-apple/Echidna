@@ -36,6 +36,7 @@ Echidna is a standalone Discord bot adapted from the architecture and ideas of [
    | \`DISCORD_BOT_TOKEN\` | Yes | Discord bot token |
    | \`GEMINI_API_KEY\` | Yes | Google Gemini API key |
    | \`GEMINI_MODEL\` | No | Defaults to \`gemini-4-hydrogen\` |
+   | \`GEMINI_TIMEOUT_MS\` | No | Gemini request timeout in milliseconds; defaults to \`60000\` (allowed: 1000–180000) |
    | \`PORT\` | No | HTTP port; defaults to \`3000\` |
    | \`DISCORD_CLIENT_ID\` | For slash commands | Discord application ID |
    | \`DISCORD_GUILD_ID\` | Optional | Guild ID for fast guild-scoped command registration |

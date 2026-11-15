@@ -1,12 +1,24 @@
 import { generateReply } from "./ai.js";
 
-const MAX_HISTORY_MESSAGES = 32;
+const MAX_HISTORY_MESSAGES = 20;
+const MAX_HISTORY_CHANNELS = 200;
+const MAX_PENDING_PER_CHANNEL = 3;
 const histories = new Map();
 const channelQueues = new Map();
 
 function getHistory(key) {
-  if (!histories.has(key)) histories.set(key, []);
-  return histories.get(key);
+  if (histories.has(key)) {
+    const history = histories.get(key);
+    histories.delete(key);
+    histories.set(key, history);
+    return history;
+  }
+  if (histories.size >= MAX_HISTORY_CHANNELS) {
+    histories.delete(histories.keys().next().value);
+  }
+  const history = [];
+  histories.set(key, history);
+  return history;
 }
 
 function trimHistory(history) {
@@ -72,7 +84,7 @@ export async function handleMessage(message, client) {
   const directlyMentioned = message.mentions.users.has(client.user.id);
   let isReplyToBot = false;
 
-  if (message.reference?.messageId) {
+  if (!directlyMentioned && message.reference?.messageId) {
     try {
       const referenced = await message.fetchReference();
       isReplyToBot = referenced.author?.id === client.user.id;
@@ -107,17 +119,30 @@ export async function handleMessage(message, client) {
 
   // Serialize per-channel requests so conversation history stays in order.
   const channelId = message.channelId;
-  const previous = channelQueues.get(channelId) || Promise.resolve();
+  const queued = channelQueues.get(channelId);
+  if (queued?.count >= MAX_PENDING_PER_CHANNEL) {
+    await message.reply({
+      content: "I’m catching up on messages in this channel. Please try again in a few seconds.",
+      allowedMentions: { repliedUser: false },
+    }).catch((error) => console.error("[Discord] Could not send busy reply:", error));
+    return;
+  }
+
+  const previous = queued?.promise || Promise.resolve();
+  const count = (queued?.count || 0) + 1;
   const current = previous
     .catch(() => {})
     .then(() => processAcceptedMessage(message, cleaned));
 
-  channelQueues.set(channelId, current);
+  channelQueues.set(channelId, { promise: current, count });
   try {
     await current;
   } finally {
-    if (channelQueues.get(channelId) === current) {
+    const latest = channelQueues.get(channelId);
+    if (latest?.promise === current) {
       channelQueues.delete(channelId);
+    } else if (latest) {
+      latest.count -= 1;
     }
   }
 }

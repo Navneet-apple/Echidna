@@ -6,8 +6,11 @@ if (!apiKey) {
 }
 
 const requestTimeoutMs = Number(process.env.GEMINI_TIMEOUT_MS || 60000);
+if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 180000) {
+  throw new Error("GEMINI_TIMEOUT_MS must be a whole number between 1000 and 180000.");
+}
 const ai = new GoogleGenAI({ apiKey });
-const model = process.env.GEMINI_MODEL || "gemini-4-hydrogen";
+const model = process.env.GEMINI_MODEL?.trim() || "gemini-4-hydrogen";
 const systemInstruction =
   process.env.BOT_SYSTEM_PROMPT ||
   "You are Echidna, a helpful and clear Discord community assistant. Be concise, accurate, and respectful.";

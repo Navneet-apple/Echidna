@@ -164,13 +164,23 @@ client.on(Events.Debug, (info) => {
 });
 
 client.on(Events.MessageCreate, (message) => {
-  void handleMessage(message, client);
+  void handleMessage(message, client).catch(async (error) => {
+    console.error("[Message] Handler failed:", error?.stack || error);
+    await message.reply({
+      content: "I hit an unexpected error while handling that. Please try again.",
+      allowedMentions: { repliedUser: false },
+    }).catch((replyError) => {
+      console.error("[Discord] Could not send handler error reply:", replyError);
+    });
+  });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === "ping") {
-    await interaction.reply("Pong! Echidna is online.");
+    await interaction.reply("Pong! Echidna is online.").catch((error) => {
+      console.error("[Discord] Could not respond to /ping:", error);
+    });
   }
 });
 
@@ -195,9 +205,10 @@ process.on("uncaughtException", (error) => {
 async function startDiscord() {
   let attempt = 0;
   while (!client.isReady()) {
+    let loginWatchdog;
     try {
       console.log("[Discord] Starting discord.js login; token value hidden.");
-      const loginWatchdog = setTimeout(() => {
+      loginWatchdog = setTimeout(() => {
         console.warn("[Discord] Login is still in progress. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
       }, 45000);
       loginWatchdog.unref();
@@ -207,6 +218,7 @@ async function startDiscord() {
       console.log("[Discord] Login promise resolved. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
       return;
     } catch (error) {
+      clearTimeout(loginWatchdog);
       const status = error?.status ?? error?.httpStatus;
       const invalidToken = status === 401 || /tokeninvalid|invalid token/i.test(error?.message || "");
       if (invalidToken) {
