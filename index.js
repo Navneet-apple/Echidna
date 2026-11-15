@@ -141,19 +141,51 @@ process.on("uncaughtException", (error) => {
   process.exit(1);
 });
 
-console.log("[Discord] Starting login; token variable is present (value hidden).");
-const loginWatchdog = setTimeout(() => {
-  console.error("[Discord] Login still pending after 30 seconds. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
-}, 30000);
-loginWatchdog.unref();
+async function verifyDiscordGatewayAccess() {
+  const startedAt = Date.now();
+  console.log("[Discord:preflight] Checking authenticated Discord Gateway API access (token hidden).");
+  let response;
+  try {
+    response = await fetch("https://discord.com/api/v10/gateway/bot", {
+      method: "GET",
+      headers: { Authorization: "Bot " + process.env.DISCORD_BOT_TOKEN.trim() },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (error) {
+    console.error("[Discord:preflight] Gateway API request failed:", error?.name || "Error", error?.message || "No error message", "after", Date.now() - startedAt, "ms");
+    throw new Error("Cannot reach Discord Gateway API from this Render instance.");
+  }
 
-client.login(process.env.DISCORD_BOT_TOKEN.trim())
-  .then(() => {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error("[Discord:preflight] Gateway API rejected the request with HTTP", response.status, "code:", body?.code ?? "unknown", "message:", body?.message ?? "unknown");
+    throw new Error("Discord Gateway API authentication failed (HTTP " + response.status + "). Check the bot token in Render environment variables.");
+  }
+
+  console.log("[Discord:preflight] Gateway API reachable; HTTP", response.status, "in", Date.now() - startedAt, "ms; gateway host:", String(body.url || "").replace(/^wss?:\\/\\//, ""), "recommended shards:", body.shards);
+}
+
+async function startDiscord() {
+  await verifyDiscordGatewayAccess();
+  console.log("[Discord] Starting discord.js login; token value hidden.");
+  const loginWatchdog = setTimeout(() => {
+    console.error("[Discord] Login still pending after 30 seconds. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
+  }, 30000);
+  loginWatchdog.unref();
+
+  try {
+    await client.login(process.env.DISCORD_BOT_TOKEN.trim());
     clearTimeout(loginWatchdog);
     console.log("[Discord] Login promise resolved. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
-  })
-  .catch((error) => {
+  } catch (error) {
     clearTimeout(loginWatchdog);
     console.error("[Discord] Login failed:", error);
-    process.exit(1);
-  });
+    process.exitCode = 1;
+    server.close(() => process.exit(1));
+  }
+}
+
+void startDiscord().catch((error) => {
+  console.error("[Discord:startup] Discord startup aborted:", error?.message || error);
+  process.exit(1);
+});
