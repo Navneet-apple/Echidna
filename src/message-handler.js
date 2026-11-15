@@ -14,7 +14,10 @@ function trimHistory(history) {
 
 export async function handleMessage(message, client) {
   if (!message || message.author?.bot || message.webhookId) return;
-  if (!client.user) return;
+  if (!client.user) {
+    console.warn("[Message] Ignored message because the Discord client is not ready.");
+    return;
+  }
 
   const directlyMentioned = message.mentions.users.has(client.user.id);
   let isReplyToBot = false;
@@ -28,8 +31,18 @@ export async function handleMessage(message, client) {
     }
   }
 
+  console.log("[Message] Received user message:", JSON.stringify({
+    guildId: message.guildId,
+    channelId: message.channelId,
+    messageId: message.id,
+    directlyMentioned,
+    isReplyToBot,
+    contentLength: message.content?.length ?? 0,
+  }));
+
   if (!directlyMentioned && !isReplyToBot) return;
 
+  console.log("[Message] Trigger accepted; preparing Gemini request.");
   const cleaned = message.content
     .replaceAll("<@" + client.user.id + ">", "")
     .replaceAll("<@!" + client.user.id + ">", "")
@@ -48,6 +61,7 @@ export async function handleMessage(message, client) {
 
   try {
     const response = await generateReply(history, cleaned);
+    console.log("[AI] Gemini response generated; characters:", response.length);
     history.push({ role: "user", text: cleaned });
     history.push({ role: "model", text: response });
     trimHistory(history);
@@ -65,7 +79,7 @@ export async function handleMessage(message, client) {
       });
     }
   } catch (error) {
-    console.error("[AI] Response failed:", error);
+    console.error("[AI] Response failed:", error?.stack || error);
     await message.reply({
       content: "I'm unable to reach the AI service right now. Please try again shortly.",
       allowedMentions: { repliedUser: false },
