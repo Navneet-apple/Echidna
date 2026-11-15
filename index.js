@@ -72,6 +72,11 @@ client.on(Events.ShardDisconnect, () => {
   console.warn("[Discord] Gateway disconnected.");
 });
 
+client.on(Events.ShardReady, () => {
+  discordReady = true;
+  console.log("[Discord] Gateway shard ready.");
+});
+
 client.on(Events.ShardResume, () => {
   discordReady = true;
   console.log("[Discord] Gateway session resumed.");
