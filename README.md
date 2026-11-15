@@ -92,7 +92,7 @@ Create an HTTP monitor with your preferred monitoring provider:
 - Interval: 5 minutes
 - Expected status: \`200\`
 
-The endpoint reports whether the process is alive and whether the Discord client is ready. A non-200 response indicates that the bot is not ready. Configure the monitor to send downtime notifications.
+Use `/health` for Render's health check; it returns HTTP 200 while the web process is serving. Use `/ready` for external alerts; it returns HTTP 503 when Discord is disconnected. Configure your monitor to check `/ready` every five minutes and send downtime notifications.
 
 ## Project structure
 
