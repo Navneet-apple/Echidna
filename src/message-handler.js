@@ -1,6 +1,6 @@
 import { generateReply } from "./ai.js";
 
-const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_MESSAGES = 32;
 const histories = new Map();
 const channelQueues = new Map();
 
@@ -13,12 +13,18 @@ function trimHistory(history) {
   while (history.length > MAX_HISTORY_MESSAGES) history.shift();
 }
 
-async function processAcceptedMessage(message, client, cleaned) {
+async function processAcceptedMessage(message, cleaned) {
   const history = getHistory(message.channelId);
-  await message.channel.sendTyping().catch(() => {});
   const startedAt = Date.now();
+  let typingTimer;
 
   try {
+    await message.channel.sendTyping().catch(() => {});
+    // Discord typing indicators expire quickly; refresh while Gemini is working.
+    typingTimer = setInterval(() => {
+      void message.channel.sendTyping().catch(() => {});
+    }, 8000);
+
     console.log("[AI] Gemini request started; history messages:", history.length);
     const response = await generateReply(history, cleaned);
     console.log("[AI] Gemini response generated; characters:", response.length, "durationMs:", Date.now() - startedAt);
@@ -51,6 +57,8 @@ async function processAcceptedMessage(message, client, cleaned) {
     }).catch((replyError) => {
       console.error("[Discord] Could not send error reply:", replyError);
     });
+  } finally {
+    if (typingTimer) clearInterval(typingTimer);
   }
 }
 
@@ -97,13 +105,12 @@ export async function handleMessage(message, client) {
     return;
   }
 
-  // Keep each channel's requests in order so rapid messages cannot race
-  // against one another while reading and updating conversation history.
+  // Serialize per-channel requests so conversation history stays in order.
   const channelId = message.channelId;
   const previous = channelQueues.get(channelId) || Promise.resolve();
   const current = previous
     .catch(() => {})
-    .then(() => processAcceptedMessage(message, client, cleaned));
+    .then(() => processAcceptedMessage(message, cleaned));
 
   channelQueues.set(channelId, current);
   try {

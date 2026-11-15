@@ -26,16 +26,22 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Channel, Partials.Message],
+  // Echidna is a small community bot and intentionally runs as one shard.
+  shards: [0],
+  shardCount: 1,
   allowedMentions: { parse: [], repliedUser: false },
 });
 
 const gatewayStatusNames = {
-  0: "IDLE",
+  0: "READY",
   1: "CONNECTING",
   2: "RECONNECTING",
-  3: "IDENTIFYING",
-  4: "READY",
+  3: "IDLE",
+  4: "NEARLY",
   5: "DISCONNECTED",
+  6: "WAITING_FOR_GUILDS",
+  7: "IDENTIFYING",
+  8: "RESUMING",
 };
 
 function gatewaySnapshot() {
@@ -45,6 +51,51 @@ function gatewaySnapshot() {
     ping: shard.ping,
   }));
 }
+
+// discord.js normally calls the authenticated /gateway/bot route to discover
+// the Gateway URL and shard recommendation. Render's current egress is
+// receiving a Cloudflare HTML 429 from that route. Since Echidna is explicitly
+// configured for one shard, use Discord's public /gateway route for the URL
+// and provide single-shard metadata to discord.js. The Gateway itself still
+// enforces Discord's real session and identify limits.
+const originalRestGet = client.rest.get.bind(client.rest);
+client.rest.get = async (route, options) => {
+  if (route === "/gateway/bot") {
+    let gatewayUrl = "wss://gateway.discord.gg";
+    try {
+      const response = await fetch("https://discord.com/api/v10/gateway", {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (typeof data.url === "string" && data.url.startsWith("wss://")) {
+          gatewayUrl = data.url;
+        } else {
+          console.warn("[Discord:gateway] Public endpoint returned an unexpected URL; using the documented Gateway fallback.");
+        }
+      } else {
+        console.warn("[Discord:gateway] Public endpoint returned HTTP", response.status, "; using the documented Gateway fallback.");
+      }
+    } catch (error) {
+      console.warn("[Discord:gateway] Public endpoint unavailable:", error?.message || error, "; using the documented Gateway fallback.");
+    }
+
+    console.log("[Discord:gateway] Using single-shard Gateway URL:", gatewayUrl);
+    return {
+      url: gatewayUrl,
+      shards: 1,
+      session_start_limit: {
+        total: 1,
+        remaining: 1,
+        reset_after: 5000,
+        max_concurrency: 1,
+      },
+    };
+  }
+
+  return originalRestGet(route, options);
+};
 
 app.get("/health", (_req, res) => {
   res.status(200).json({
@@ -79,14 +130,14 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log("[Discord] READY — logged in as " + readyClient.user.tag);
 });
 
-client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
-  discordReady = false;
-  console.warn("[Discord] Gateway shard " + shardId + " disconnected:", closeEvent?.code, closeEvent?.reason || "");
-});
-
 client.on(Events.ShardReady, (shardId) => {
   discordReady = true;
   console.log("[Discord] Gateway shard " + shardId + " ready.");
+});
+
+client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
+  discordReady = false;
+  console.warn("[Discord] Gateway shard " + shardId + " disconnected:", closeEvent?.code, closeEvent?.reason || "");
 });
 
 client.on(Events.ShardResume, (shardId, replayedEvents) => {
@@ -141,58 +192,36 @@ process.on("uncaughtException", (error) => {
   process.exit(1);
 });
 
-async function verifyDiscordGatewayAccess() {
-  const startedAt = Date.now();
-  console.log("[Discord:preflight] Checking authenticated Discord Gateway API access (token hidden).");
-  let response;
-  try {
-    response = await fetch("https://discord.com/api/v10/gateway/bot", {
-      method: "GET",
-      headers: { Authorization: "Bot " + process.env.DISCORD_BOT_TOKEN.trim() },
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch (error) {
-    console.error("[Discord:preflight] Gateway API request failed:", error?.name || "Error", error?.message || "No error message", "after", Date.now() - startedAt, "ms");
-    throw new Error("Cannot reach Discord Gateway API from this Render instance.");
-  }
-
-  const rawBody = await response.text();
-  let body = {};
-  try { body = JSON.parse(rawBody); } catch { /* Discord edge errors may not be JSON. */ }
-
-  if (response.status === 429) {
-    const retryAfter = Number(response.headers.get("retry-after") || body?.retry_after || 5);
-    const waitMs = Math.min(Math.max(retryAfter * 1000, 1000), 60000);
-    console.warn("[Discord:preflight] Discord rate-limited the Gateway API request (HTTP 429). Retry-After:", retryAfter, "seconds; response:", rawBody.slice(0, 240));
-    console.warn("[Discord:preflight] Waiting", waitMs, "ms, then allowing discord.js to perform its own Gateway connection.");
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-    return;
-  }
-
-  if (!response.ok) {
-    console.error("[Discord:preflight] Gateway API rejected the request with HTTP", response.status, "code:", body?.code ?? "unknown", "message:", body?.message ?? rawBody.slice(0, 240));
-    throw new Error("Discord Gateway API request failed (HTTP " + response.status + "). Check the bot token and Discord application configuration.");
-  }
-
-  console.log("[Discord:preflight] Gateway API reachable; HTTP", response.status, "in", Date.now() - startedAt, "ms; gateway host:", String(body.url || "").split("://").pop(), "recommended shards:", body.shards);
-}
 async function startDiscord() {
-  await verifyDiscordGatewayAccess();
-  console.log("[Discord] Starting discord.js login; token value hidden.");
-  const loginWatchdog = setTimeout(() => {
-    console.error("[Discord] Login still pending after 30 seconds. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
-  }, 30000);
-  loginWatchdog.unref();
+  let attempt = 0;
+  while (!client.isReady()) {
+    try {
+      console.log("[Discord] Starting discord.js login; token value hidden.");
+      const loginWatchdog = setTimeout(() => {
+        console.warn("[Discord] Login is still in progress. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
+      }, 45000);
+      loginWatchdog.unref();
 
-  try {
-    await client.login(process.env.DISCORD_BOT_TOKEN.trim());
-    clearTimeout(loginWatchdog);
-    console.log("[Discord] Login promise resolved. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
-  } catch (error) {
-    clearTimeout(loginWatchdog);
-    console.error("[Discord] Login failed:", error);
-    process.exitCode = 1;
-    server.close(() => process.exit(1));
+      await client.login(process.env.DISCORD_BOT_TOKEN.trim());
+      clearTimeout(loginWatchdog);
+      console.log("[Discord] Login promise resolved. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
+      return;
+    } catch (error) {
+      const status = error?.status ?? error?.httpStatus;
+      const invalidToken = status === 401 || /tokeninvalid|invalid token/i.test(error?.message || "");
+      if (invalidToken) {
+        console.error("[Discord] Login rejected. Check DISCORD_BOT_TOKEN in Render; its value is not logged.");
+        process.exitCode = 1;
+        server.close(() => process.exit(1));
+        return;
+      }
+
+      attempt += 1;
+      const delayMs = Math.min(30000 * 2 ** Math.min(attempt - 1, 4), 300000);
+      console.error("[Discord] Login attempt failed:", error?.stack || error);
+      console.warn("[Discord] Retrying Gateway login in", Math.round(delayMs / 1000), "seconds.");
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
 }
 
