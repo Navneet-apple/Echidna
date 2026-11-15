@@ -6,6 +6,7 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY,
   httpOptions: {
     apiVersion: "v1beta",
+    timeout: 30000,
     retryOptions: {
       attempts: 3,
       initialDelay: 1,
@@ -60,9 +61,14 @@ module.exports = {
       attachment.contentType?.startsWith("image/"),
     );
 
+    const showTyping = () =>
+      message.channel.sendTyping().catch((error) => {
+        console.warn("[AI] Could not send typing indicator:", error?.message || error);
+      });
+
     // Help responder
     if (!question && imageAttachments.size === 0) {
-      await message.channel.sendTyping();
+      await showTyping();
 
       await message.reply({
         embeds: [
@@ -90,11 +96,8 @@ module.exports = {
     }
 
     // AI responder
-    await message.channel.sendTyping();
-
-    const typingInterval = setInterval(() => {
-      message.channel.sendTyping().catch(() => {});
-    }, 7000);
+    void showTyping();
+    const typingInterval = setInterval(() => void showTyping(), 7000);
 
     try {
       const messageParts = [];
@@ -142,6 +145,7 @@ module.exports = {
       }
 
       // Generate AI response
+      console.log("[AI] Generating response.");
       const response = await ai.models.generateContent({
         model: "gemini-4-hydrogen",
         contents: [
@@ -159,6 +163,7 @@ module.exports = {
           },
         },
       });
+      console.log("[AI] Response generated.");
 
       // Check Google Search usage
       const usedSearch =
@@ -183,11 +188,19 @@ module.exports = {
       await message.reply({
         content: `${safeText || "No response generated."}${footer}`,
       });
+      console.log("[AI] Reply sent.");
     } catch (error) {
       console.error("AI Generation Error:", error);
 
+      const invalidApiKey =
+        error?.status === 400 && /api.?key|api_key/i.test(error?.message || "");
+
       await message.reply({
-        content: "An error occurred while processing your request.",
+        content: invalidApiKey
+          ? "I can't reach my AI service right now. Please ask my owner to check the Google AI API key."
+          : "I couldn't complete that request just now. Please try again in a moment.",
+      }).catch((replyError) => {
+        console.error("[AI] Could not send error reply:", replyError);
       });
     } finally {
       clearInterval(typingInterval);
