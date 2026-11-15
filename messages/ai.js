@@ -76,9 +76,12 @@ module.exports = {
 
     const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
     if (!apiKey) {
-      await message.reply(
-        "My AI service isn't configured yet. Please ask my owner to add a Pollinations API key.",
-      );
+      console.error("[AI] POLLINATIONS_API_KEY is not configured.");
+      await showTyping();
+      await message
+        .reply("My AI service isn't configured yet. Please ask my owner to add a Pollinations API key.")
+        .then(() => console.log("[AI] Missing-key notice sent."))
+        .catch((error) => console.error("[AI] Could not send missing-key notice:", error));
       return;
     }
 
