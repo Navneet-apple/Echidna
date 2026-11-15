@@ -19,6 +19,8 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 let discordReady = false;
 
+app.get("/ping", (_req, res) => res.status(200).send("OK"));
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -120,6 +122,25 @@ app.get("/ready", (_req, res) => {
 });
 
 app.get("/", (_req, res) => res.status(200).send("Echidna is running."));
+
+const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.trim().replace(/\/+$/, "");
+if (renderExternalUrl) {
+  const selfPingUrl = renderExternalUrl + "/ping";
+  const pingRender = async () => {
+    try {
+      const response = await fetch(selfPingUrl, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) {
+        console.warn("[HTTP] Render self-ping returned HTTP", response.status);
+      }
+    } catch (error) {
+      console.warn("[HTTP] Render self-ping failed:", error?.message || error);
+    }
+  };
+
+  const selfPingTimer = setInterval(() => void pingRender(), 14 * 60 * 1000);
+  selfPingTimer.unref();
+  void pingRender();
+}
 
 const server = app.listen(port, "0.0.0.0", () => {
   console.log("[HTTP] Health server listening on port " + port);

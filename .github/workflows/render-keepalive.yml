@@ -1,0 +1,13 @@
+name: Render Keepalive
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render service
+        run: curl -fsS "${{ secrets.RENDER_EXTERNAL_URL || vars.RENDER_EXTERNAL_URL }}/ping"
