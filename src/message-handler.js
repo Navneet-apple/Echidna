@@ -27,7 +27,7 @@ async function processAcceptedMessage(message, client, cleaned) {
     history.push({ role: "model", text: response });
     trimHistory(history);
 
-    const chunks = response.match(/[\\s\\S]{1,1900}/g) || ["I couldn't produce a response."];
+    const chunks = response.match(/[\s\S]{1,1900}/g) || ["I couldn't produce a response."];
     await message.reply({
       content: chunks[0],
       allowedMentions: { repliedUser: false },
