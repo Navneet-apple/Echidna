@@ -26,17 +26,32 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Channel, Partials.Message],
-  allowedMentions: {
-    parse: [],
-    repliedUser: false,
-  },
+  allowedMentions: { parse: [], repliedUser: false },
 });
+
+const gatewayStatusNames = {
+  0: "IDLE",
+  1: "CONNECTING",
+  2: "RECONNECTING",
+  3: "IDENTIFYING",
+  4: "READY",
+  5: "DISCONNECTED",
+};
+
+function gatewaySnapshot() {
+  return [...client.ws.shards.values()].map((shard) => ({
+    id: shard.id,
+    status: gatewayStatusNames[shard.status] || "UNKNOWN(" + shard.status + ")",
+    ping: shard.ping,
+  }));
+}
 
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
     service: "echidna",
     discord: discordReady && client.isReady() ? "connected" : "disconnected",
+    gateway: gatewaySnapshot(),
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
   });
@@ -48,13 +63,12 @@ app.get("/ready", (_req, res) => {
     status: ready ? "ready" : "not_ready",
     service: "echidna",
     discord: ready ? "connected" : "disconnected",
+    gateway: gatewaySnapshot(),
     timestamp: new Date().toISOString(),
   });
 });
 
-app.get("/", (_req, res) => {
-  res.status(200).send("Echidna is running.");
-});
+app.get("/", (_req, res) => res.status(200).send("Echidna is running."));
 
 const server = app.listen(port, "0.0.0.0", () => {
   console.log("[HTTP] Health server listening on port " + port);
@@ -84,12 +98,16 @@ client.on(Events.ShardError, (error, shardId) => {
   console.error("[Discord] Gateway shard " + shardId + " error:", error);
 });
 
-client.on(Events.Warn, (warning) => {
-  console.warn("[Discord] Warning:", warning);
+client.on(Events.Raw, (packet) => {
+  if (["READY", "RESUMED", "INVALID_SESSION"].includes(packet?.t)) {
+    console.log("[Discord:raw] Gateway dispatch:", packet.t);
+  }
 });
 
+client.on(Events.Warn, (warning) => console.warn("[Discord] Warning:", warning));
+
 client.on(Events.Debug, (info) => {
-  if (/connecting|identify|hello|heartbeat|ready|resume|error|close/i.test(info)) {
+  if (/connecting|identify|hello|heartbeat|ready|resume|error|close|invalid|gateway/i.test(info)) {
     console.log("[Discord:debug]", info);
   }
 });
@@ -105,9 +123,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-client.on(Events.Error, (error) => {
-  console.error("[Discord] Client error:", error);
-});
+client.on(Events.Error, (error) => console.error("[Discord] Client error:", error));
 
 async function shutdown(signal) {
   console.log("[Process] Received " + signal + "; shutting down.");
@@ -119,9 +135,7 @@ async function shutdown(signal) {
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
-process.on("unhandledRejection", (reason) => {
-  console.error("[Process] Unhandled rejection:", reason);
-});
+process.on("unhandledRejection", (reason) => console.error("[Process] Unhandled rejection:", reason));
 process.on("uncaughtException", (error) => {
   console.error("[Process] Uncaught exception:", error);
   process.exit(1);
@@ -129,14 +143,14 @@ process.on("uncaughtException", (error) => {
 
 console.log("[Discord] Starting login; token variable is present (value hidden).");
 const loginWatchdog = setTimeout(() => {
-  console.error("[Discord] Login has not completed after 30 seconds. Current WebSocket status:", client.ws.status);
+  console.error("[Discord] Login still pending after 30 seconds. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
 }, 30000);
 loginWatchdog.unref();
 
 client.login(process.env.DISCORD_BOT_TOKEN.trim())
   .then(() => {
     clearTimeout(loginWatchdog);
-    console.log("[Discord] Login promise resolved. WebSocket status:", client.ws.status);
+    console.log("[Discord] Login promise resolved. Gateway snapshot:", JSON.stringify(gatewaySnapshot()));
   })
   .catch((error) => {
     clearTimeout(loginWatchdog);
