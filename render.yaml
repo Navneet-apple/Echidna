@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: echidna
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /ping
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: POLLINATIONS_API_KEY
+        sync: false
