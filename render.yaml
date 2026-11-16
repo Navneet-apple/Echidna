@@ -11,7 +11,5 @@ services:
         value: production
       - key: DISCORD_BOT_TOKEN
         sync: false
-      - key: CLIENT_ID
-        sync: false
       - key: POLLINATIONS_API_KEY
         sync: false

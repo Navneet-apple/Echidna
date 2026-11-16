@@ -8,8 +8,6 @@ const {
   Collection,
   GatewayIntentBits,
   Partials,
-  REST,
-  Routes,
 } = require("discord.js");
 // Render can have higher or more variable outbound latency than a local
 // Termux connection. Keep the library's normal timeout and retry behavior.
@@ -104,33 +102,13 @@ if (renderExternalUrl) {
   void selfPing();
 }
 
-// Render has returned Cloudflare errors for Discord's authenticated
-// /gateway/bot endpoint. This bot is single-shard, so use the public gateway
-// URL and supply the matching single-shard metadata to discord.js.
+// Discord's HTTP API is returning 429 responses to this Render service.
+// Avoid an extra HTTP lookup and use the documented Gateway URL directly.
 const originalRestGet = client.rest.get.bind(client.rest);
 client.rest.get = async (route, options) => {
   if (route !== "/gateway/bot") return originalRestGet(route, options);
 
-  let gatewayUrl = "wss://gateway.discord.gg";
-  try {
-    const response = await fetch("https://discord.com/api/v10/gateway", {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (response.ok) {
-      const data = await response.json();
-      if (typeof data.url === "string" && data.url.startsWith("wss://")) {
-        gatewayUrl = data.url;
-      } else {
-        console.warn("[Discord:gateway] Public endpoint returned an unexpected URL; using the documented fallback.");
-      }
-    } else {
-      console.warn("[Discord:gateway] Public endpoint returned HTTP", response.status, "; using the documented fallback.");
-    }
-  } catch (error) {
-    console.warn("[Discord:gateway] Public endpoint unavailable:", error?.message || error, "; using the documented fallback.");
-  }
-
+  const gatewayUrl = "wss://gateway.discord.gg";
   console.log("[Discord:gateway] Using single-shard Gateway URL:", gatewayUrl);
   return {
     url: gatewayUrl,
@@ -221,36 +199,6 @@ console.log("[Startup] Discord listeners:", {
   messageContentIntent: client.options.intents.has(GatewayIntentBits.MessageContent),
   directMessagesIntent: client.options.intents.has(GatewayIntentBits.DirectMessages),
 });
-
-async function syncSlashCommands() {
-  const clientId = process.env.CLIENT_ID?.trim();
-  if (!clientId) {
-    console.warn("[Commands] CLIENT_ID is missing; slash commands were not synced.");
-    return;
-  }
-
-  const commands = [...client.commands.values()].map((command) =>
-    command.data.toJSON(),
-  );
-  const rest = new REST({
-    ...DISCORD_REST_OPTIONS,
-  }).setToken(
-    process.env.DISCORD_BOT_TOKEN.trim(),
-  );
-  logRestIssues(rest, "command-sync");
-
-  console.log(`[Commands] Syncing ${commands.length} global command(s) in background.`);
-  try {
-    const data = await rest.put(Routes.applicationCommands(clientId), {
-      body: commands,
-    });
-    console.log(`[Commands] Synced ${data.length} global command(s).`);
-  } catch (error) {
-    console.error("[Commands] Background sync failed; the bot will continue starting:", error);
-  }
-}
-
-void syncSlashCommands();
 
 client.on("raw", (packet) => {
   if (packet.t === "INTERACTION_CREATE") {
