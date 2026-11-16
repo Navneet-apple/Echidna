@@ -35,6 +35,21 @@ const client = new Client({
     repliedUser: true,
   },
 });
+
+function logRestIssues(rest, label) {
+  rest.on("rateLimited", ({ global, retryAfter, scope, method }) => {
+    console.warn(
+      `[Discord:REST:${label}] Rate limited; method=${method}, scope=${scope}, global=${global}, retryAfterMs=${retryAfter}`,
+    );
+  });
+  rest.on("response", (_request, response) => {
+    if (response.status >= 400) {
+      console.warn(`[Discord:REST:${label}] HTTP ${response.status} response.`);
+    }
+  });
+}
+
+logRestIssues(client.rest, "bot");
 require("dotenv").config({
   path: path.resolve(__dirname, ".env"),
   quiet: true,
@@ -216,6 +231,7 @@ async function syncSlashCommands() {
   }).setToken(
     process.env.DISCORD_BOT_TOKEN.trim(),
   );
+  logRestIssues(rest, "command-sync");
 
   console.log(`[Commands] Syncing ${commands.length} global command(s) in background.`);
   try {
