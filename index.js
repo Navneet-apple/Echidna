@@ -44,7 +44,13 @@ function logRestIssues(rest, label) {
   });
   rest.on("response", (_request, response) => {
     if (response.status >= 400) {
-      console.warn(`[Discord:REST:${label}] HTTP ${response.status} response.`);
+      const retryAfter = response.headers?.get?.("retry-after") || "unknown";
+      const scope = response.headers?.get?.("x-ratelimit-scope") || "unknown";
+      const global = response.headers?.get?.("x-ratelimit-global") || "unknown";
+      const cfMitigated = response.headers?.get?.("cf-mitigated") || "none";
+      console.warn(
+        `[Discord:REST:${label}] HTTP ${response.status}; retryAfter=${retryAfter}, scope=${scope}, global=${global}, cfMitigated=${cfMitigated}.`,
+      );
     }
   });
 }
