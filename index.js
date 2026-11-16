@@ -11,6 +11,12 @@ const {
   REST,
   Routes,
 } = require("discord.js");
+// Render can have higher or more variable outbound latency than a local
+// Termux connection. Keep the library's normal timeout and retry behavior.
+const DISCORD_REST_OPTIONS = {
+  timeout: 15_000,
+  retries: 3,
+};
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -20,10 +26,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Message, Partials.Channel],
-  rest: {
-    timeout: 2500,
-    retries: 0,
-  },
+  rest: DISCORD_REST_OPTIONS,
   // This personal assistant uses a single Gateway shard.
   shards: [0],
   shardCount: 1,
@@ -209,8 +212,7 @@ async function syncSlashCommands() {
     command.data.toJSON(),
   );
   const rest = new REST({
-    timeout: 2500,
-    retries: 0,
+    ...DISCORD_REST_OPTIONS,
   }).setToken(
     process.env.DISCORD_BOT_TOKEN.trim(),
   );

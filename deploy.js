@@ -24,8 +24,8 @@ for (const file of commandFiles) {
 }
 
 const rest = new REST({
-  timeout: 2500,
-  retries: 0,
+  timeout: 15_000,
+  retries: 3,
 }).setToken(
   process.env.DISCORD_BOT_TOKEN,
 );
